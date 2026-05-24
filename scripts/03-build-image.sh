@@ -152,7 +152,7 @@ GRUB_DISABLE_SUBMENU=y
 GRUB_DISABLE_RECOVERY=true
 GRUB_TERMINAL="console serial"
 GRUB_SERIAL_COMMAND="serial --unit=0 --speed=115200"
-GRUB_CMDLINE_LINUX_DEFAULT="modules=sd-mod,usb-storage,btrfs rootfstype=btrfs rootflags=subvol=@ console=ttyS0,115200 console=tty0 quiet"
+GRUB_CMDLINE_LINUX_DEFAULT="modules=sd-mod,usb-storage,btrfs rootfstype=btrfs rootflags=subvol=@ console=tty0 console=ttyS0,115200"
 GRUB_CMDLINE_LINUX=""
 GRUB_EOF
 
