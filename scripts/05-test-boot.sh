@@ -248,8 +248,8 @@ wait_marker "NET" "已获取非环回 IPv4" \
 # 即使 cloud-init done，sshd 仍可能并行启动（OpenRC default runlevel）；
 # 而且 SSH host key 是首启时由 init 脚本现场生成（02 阶段把旧 key 都删了），
 # 耗时取决于 entropy。给最多 30s retry。
-# 如果 30s 后还没启动，最后用 `rc-service sshd status` + `ls /etc/ssh/` 输出诊断信息。
-shcmd {i=0; while [ $i -lt 30 ]; do pgrep -x sshd > /dev/null && break; sleep 1; i=$((i+1)); done; if pgrep -x sshd > /dev/null; then printf '__SSHD__%s__\n' OK; else echo "--- sshd 诊断 ---"; rc-service sshd status 2>&1 || true; ls -l /etc/ssh/ 2>&1 || true; printf '__SSHD__%s__\n' FAIL; fi}
+# 如果 30s 后还没启动，输出完整诊断（rc-status / init.d / 日志 / 手动 start 错误）。
+shcmd {i=0; while [ $i -lt 30 ]; do pgrep -x sshd > /dev/null && break; sleep 1; i=$((i+1)); done; if pgrep -x sshd > /dev/null; then printf '__SSHD__%s__\n' OK; else echo "=== sshd 诊断 ==="; echo "--- rc-status (default) ---"; rc-status default 2>&1 || true; echo "--- rc-update show ---"; rc-update show default 2>&1 || true; echo "--- /etc/init.d/sshd 存在? ---"; ls -l /etc/init.d/sshd 2>&1 || true; echo "--- 手动 start sshd ---"; rc-service sshd start 2>&1 || true; echo "--- /var/log/messages tail ---"; tail -50 /var/log/messages 2>&1 || true; echo "--- dmesg tail ---"; dmesg | tail -30 2>&1 || true; printf '__SSHD__%s__\n' FAIL; fi}
 wait_marker "SSHD" "sshd 进程存在" \
                    "sshd 进程未运行（已 retry 30s）" 11 45
 
