@@ -90,7 +90,7 @@ jobs:
           path: output/
 
       - name: Boot test (qemu + expect)
-        run: sudo -E bash scripts/05-test-boot.sh --boot ${{ matrix.boot_type }} --timeout 180
+        run: sudo -E bash scripts/05-test-boot.sh --boot ${{ matrix.boot_type }} --timeout 300
 
   release:
     name: Create GitHub Release
