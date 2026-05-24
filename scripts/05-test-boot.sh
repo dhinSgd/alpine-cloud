@@ -4,12 +4,13 @@
 #   - 通过 expect 监控串口，等到 login 提示
 #   - 自动用 root / DEFAULT_ROOT_PASSWORD 登录
 #   - 跑一系列基础断言（任一失败立即非零退出）：
+#       * cloud-init status --wait 不报 error（degraded 可接受：qemu 无 AliYun datasource）
 #       * 网络：拿到非 127.x 的 IPv4 地址
 #       * sshd 进程存在
-#       * cloud-init status --wait 不报 error（degraded 可接受：qemu 无 AliYun datasource）
 #       * df -h / 显示 btrfs
 #       * btrfs filesystem df / 不报错
 #       * mount 选项含 compress=zstd 和 subvol=@
+#       * 主机名为 simplealpine
 #   - 全部通过后 poweroff
 
 set -Eeuo pipefail
@@ -107,6 +108,7 @@ export QEMU_CMD TIMEOUT ROOT_PASS
 #     13 df / 不是 btrfs
 #     14 btrfs filesystem df 失败
 #     15 mount 选项缺 zstd / subvol=@
+#     16 主机名不是 simplealpine
 #     20 自动登录失败
 #     99 未预期的 timeout
 expect <<'EXPECT_EOF'
@@ -254,6 +256,11 @@ wait_marker "BFS" "btrfs filesystem df 正常" \
 shcmd {mount | grep ' on / type btrfs' > /tmp/mnt.out; cat /tmp/mnt.out; if grep -qE 'compress(-force)?=zstd' /tmp/mnt.out && grep -q 'subvol=/@' /tmp/mnt.out; then printf '__MNT__%s__\n' OK; else printf '__MNT__%s__\n' FAIL; fi}
 wait_marker "MNT" "btrfs 挂载选项含 zstd 压缩 + subvol=@" \
                    "btrfs 挂载选项缺 zstd 或 subvol=@" 15 15
+
+# ---------- Stage 9: 主机名 ----------
+shcmd {hostname > /tmp/hostname.out; cat /tmp/hostname.out; if grep -qx 'simplealpine' /tmp/hostname.out; then printf '__HOSTNAME__%s__\n' OK; else printf '__HOSTNAME__%s__\n' FAIL; fi}
+wait_marker "HOSTNAME" "主机名为 simplealpine" \
+                       "主机名不是 simplealpine" 16 15
 
 # ---------- 全部通过 ----------
 puts "\n========================================"
