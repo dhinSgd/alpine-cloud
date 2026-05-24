@@ -1,0 +1,16 @@
+# 需要安装的额外软件包
+# 一行一个，# 开头为注释
+
+# 网络工具
+iputils
+wget
+curl
+
+# 编辑器
+nano
+
+# 时间同步
+chrony
+
+# 云镜像自动扩容必需
+cloud-utils-growpart

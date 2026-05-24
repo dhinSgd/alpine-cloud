@@ -1,0 +1,36 @@
+# 要从磁盘实际删除的内核模块目录/文件
+# 路径相对于 /lib/modules/<version>/kernel/
+# 一行一个，# 开头为注释
+
+# 蓝牙
+drivers/bluetooth
+net/bluetooth
+
+# 声卡
+sound
+
+# 显卡（保留基础 framebuffer，删高级 GPU 驱动）
+drivers/gpu/drm
+
+# 无线网卡
+drivers/net/wireless
+net/wireless
+net/mac80211
+
+# 摄像头/电视卡
+drivers/media
+
+# 游戏手柄
+drivers/input/joystick
+drivers/input/gameport
+
+# USB 音视频/调制解调器
+drivers/usb/serial
+drivers/usb/musb
+drivers/usb/atm
+
+# 触摸屏
+drivers/input/touchscreen
+
+# 平板专用
+drivers/input/tablet
