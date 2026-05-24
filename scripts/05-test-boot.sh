@@ -245,9 +245,13 @@ wait_marker "NET" "已获取非环回 IPv4" \
                   "未获取非环回 IPv4 地址（virtio-net 或 DHCP 异常）" 10 30
 
 # ---------- Stage 5: sshd 进程 ----------
-shcmd {if pgrep -x sshd > /dev/null; then printf '__SSHD__%s__\n' OK; else printf '__SSHD__%s__\n' FAIL; fi}
+# 即使 cloud-init done，sshd 仍可能并行启动（OpenRC default runlevel）；
+# 而且 SSH host key 是首启时由 init 脚本现场生成（02 阶段把旧 key 都删了），
+# 耗时取决于 entropy。给最多 30s retry。
+# 如果 30s 后还没启动，最后用 `rc-service sshd status` + `ls /etc/ssh/` 输出诊断信息。
+shcmd {i=0; while [ $i -lt 30 ]; do pgrep -x sshd > /dev/null && break; sleep 1; i=$((i+1)); done; if pgrep -x sshd > /dev/null; then printf '__SSHD__%s__\n' OK; else echo "--- sshd 诊断 ---"; rc-service sshd status 2>&1 || true; ls -l /etc/ssh/ 2>&1 || true; printf '__SSHD__%s__\n' FAIL; fi}
 wait_marker "SSHD" "sshd 进程存在" \
-                   "sshd 进程未运行" 11 15
+                   "sshd 进程未运行（已 retry 30s）" 11 45
 
 # ---------- Stage 6: df -h / 是 btrfs ----------
 shcmd {df -hT / | tail -n+2 > /tmp/df.out; cat /tmp/df.out; if awk '{print $2}' /tmp/df.out | grep -qx btrfs; then printf '__DF__%s__\n' OK; else printf '__DF__%s__\n' FAIL; fi}
