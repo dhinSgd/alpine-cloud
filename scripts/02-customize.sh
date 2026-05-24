@@ -212,8 +212,13 @@ if [ -f "$ROOTFS/etc/machine-id" ]; then
 fi
 rm -f "$ROOTFS/var/lib/dbus/machine-id"
 
-# SSH host key（首启重建）
+# SSH host key
+# 设计：build 阶段预生成一份，保证 qemu 启动测试时 sshd 能立刻起；
+# 部署到云上时由 cloud-init 的 ssh 模块（默认 ssh_deletekeys: true）
+# 在首启时删除并重生成，保证每台实例 host key 唯一。
 rm -f "$ROOTFS"/etc/ssh/ssh_host_*
+log_info "预生成 SSH host key（chroot ssh-keygen -A）"
+chroot "$ROOTFS" /usr/bin/ssh-keygen -A
 
 # cloud-init 残留状态（防止携带 build 环境痕迹）
 rm -rf "$ROOTFS/var/lib/cloud/"* 2>/dev/null || true
