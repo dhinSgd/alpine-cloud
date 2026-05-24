@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# 阶段 3: 创建目标镜像、格式化 btrfs、rsync rootfs、修正引导
-#   - 创建 1GB raw 镜像并恢复官方分区表
-#   - UEFI: 复制 ESP 分区；BIOS: 复制 MBR 引导代码（前 446 字节）
+# 阶段 3: 创建目标镜像、自建分区表、格式化 ESP/btrfs、rsync rootfs、重装 GRUB
+#   - 创建 1GB raw 镜像
+#   - 自建 GPT 分区表：p1=ESP(100MiB, vfat) + p2=root(剩余, btrfs)
+#     （不复用源 sfdisk dump：源 ESP 仅 ~512KiB，装不下含 btrfs 模块的 GRUB）
 #   - 根分区 mkfs.btrfs，创建 @ 子卷，rsync rootfs 进去
-#   - 更新 /etc/fstab 和 grub.cfg 中的 root UUID / rootfstype
+#   - chroot grub-install 重装 EFI binary（含 btrfs 模块）+ grub-mkconfig
+#   - 更新 /etc/fstab 和 grub.cfg 中的 root UUID / rootfstype / subvol
 
 set -Eeuo pipefail
 
@@ -25,23 +27,12 @@ RAW_SRC="$SRC_DIR/source-${BOOT_TYPE}.raw"
 OUTPUT_IMG="$BUILD_DIR/output-${BOOT_TYPE}.img"
 MOUNT_DIR="$BUILD_DIR/mnt-new-${BOOT_TYPE}"
 
-PART_DUMP="$SRC_DIR/partition-${BOOT_TYPE}.dump"
-ROOT_PARTNUM_FILE="$SRC_DIR/root-partnum-${BOOT_TYPE}.txt"
-ESP_PARTNUM_FILE="$SRC_DIR/esp-partnum-${BOOT_TYPE}.txt"
+[ -d "$ROOTFS" ]  || die "rootfs 不存在: $ROOTFS"
+[ -f "$RAW_SRC" ] || die "源 raw 镜像不存在: $RAW_SRC"
 
-[ -d "$ROOTFS" ]      || die "rootfs 不存在: $ROOTFS"
-[ -f "$RAW_SRC" ]     || die "源 raw 镜像不存在: $RAW_SRC"
-[ -f "$PART_DUMP" ]   || die "分区表 dump 不存在: $PART_DUMP"
-[ -f "$ROOT_PARTNUM_FILE" ] || die "未找到根分区编号文件"
-
-ROOT_PART_NUM=$(cat "$ROOT_PARTNUM_FILE")
-log_info "根分区编号: p${ROOT_PART_NUM}"
-
-if [ "$BOOT_TYPE" = "uefi" ]; then
-  [ -f "$ESP_PARTNUM_FILE" ] || die "UEFI 模式下未找到 ESP 分区编号文件"
-  ESP_PART_NUM=$(cat "$ESP_PARTNUM_FILE")
-  log_info "ESP 分区编号: p${ESP_PART_NUM}"
-fi
+# 写死自建分区编号
+ROOT_PART_NUM=2
+ESP_PART_NUM=1
 
 # ---------- 1. 创建空白镜像 ----------
 
@@ -50,10 +41,32 @@ log_info "创建空白镜像 $OUTPUT_IMG (大小: $DISK_SIZE)"
 rm -f "$OUTPUT_IMG"
 truncate -s "$DISK_SIZE" "$OUTPUT_IMG"
 
-# ---------- 2. 恢复分区表 ----------
+# ---------- 2. 自建分区表 ----------
 
-log_info "恢复分区表 (sfdisk < partition-${BOOT_TYPE}.dump)"
-sfdisk "$OUTPUT_IMG" < "$PART_DUMP" >/dev/null
+if [ "$BOOT_TYPE" = "uefi" ]; then
+  # GPT:
+  #   p1 EFI System (100 MiB, 204800 sectors @ 512B), type C12A...
+  #   p2 Linux filesystem (剩余), type 0FC6...
+  log_info "创建 GPT 分区表（ESP=100MiB + root=剩余）"
+  sfdisk "$OUTPUT_IMG" >/dev/null <<'PART_EOF'
+label: gpt
+unit: sectors
+sector-size: 512
+
+start=2048, size=204800, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="EFI System"
+type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="root"
+PART_EOF
+else
+  # BIOS 路径目前仅占位，build matrix 已禁用，此处仅做基本 DOS 分区
+  log_warn "BIOS 路径未充分测试，仅创建基础 MBR 分区"
+  sfdisk "$OUTPUT_IMG" >/dev/null <<'PART_EOF'
+label: dos
+unit: sectors
+
+start=2048, type=83, bootable
+PART_EOF
+  ROOT_PART_NUM=1
+fi
 
 # ---------- 3. losetup 目标镜像 ----------
 
@@ -65,32 +78,25 @@ log_info "目标 loop 设备: $LOOP_DEV"
 ROOT_PART="${LOOP_DEV}p${ROOT_PART_NUM}"
 [ -b "$ROOT_PART" ] || die "目标根分区设备不存在: $ROOT_PART"
 
-# ---------- 4. 引导区/ESP 复制 ----------
-
-# 同步挂载源镜像（用第二个 loop）
-log_info "再次 losetup 源镜像用于复制引导区"
-SRC_LOOP=$(attach_loop "$RAW_SRC")
-register_cleanup "detach_loop '$SRC_LOOP'"
-log_info "源 loop 设备: $SRC_LOOP"
+# ---------- 4. 格式化 ESP / 引导区 ----------
 
 if [ "$BOOT_TYPE" = "uefi" ]; then
-  SRC_ESP="${SRC_LOOP}p${ESP_PART_NUM}"
   DST_ESP="${LOOP_DEV}p${ESP_PART_NUM}"
-  [ -b "$SRC_ESP" ] || die "源 ESP 分区不存在: $SRC_ESP"
   [ -b "$DST_ESP" ] || die "目标 ESP 分区不存在: $DST_ESP"
-  log_info "dd 复制 ESP 分区: $SRC_ESP -> $DST_ESP"
-  dd if="$SRC_ESP" of="$DST_ESP" bs=1M conv=fsync status=progress
+  log_info "mkfs.vfat (FAT32) 格式化 ESP: $DST_ESP"
+  mkfs.vfat -F 32 -n "ESP" "$DST_ESP" >/dev/null
 fi
 
 if [ "$BOOT_TYPE" = "bios" ]; then
-  # 复制 MBR 引导代码（前 446 字节），分区表已通过 sfdisk 恢复
+  # 仅在 BIOS 模式下需要复用源 raw 的 MBR 引导代码（466 字节中 0–445 字节）
+  log_info "再次 losetup 源镜像用于复制 MBR 引导代码"
+  SRC_LOOP=$(attach_loop "$RAW_SRC")
+  register_cleanup "detach_loop '$SRC_LOOP'"
   log_info "dd 复制 MBR 引导代码（446 字节）"
   dd if="$SRC_LOOP" of="$LOOP_DEV" bs=446 count=1 conv=notrunc,fsync status=none
+  detach_loop "$SRC_LOOP"
+  SRC_LOOP=""
 fi
-
-# 不再需要源 loop（提前释放）
-detach_loop "$SRC_LOOP"
-SRC_LOOP=""
 
 # ---------- 5. mkfs.btrfs ----------
 
