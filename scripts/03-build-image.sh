@@ -167,8 +167,11 @@ fi
 OLD_ROOT_UUID=""
 for cfg in "$ROOTFS/boot/grub/grub.cfg" "$ROOTFS/etc/default/grub"; do
   if [ -f "$cfg" ]; then
-    OLD_ROOT_UUID=$(grep -hoE 'root=UUID=[A-Fa-f0-9-]+' "$cfg" 2>/dev/null \
-      | head -1 | cut -d= -f3)
+    # grep 没匹配时返回 1，在 set -e+pipefail 下会让命令替换整体失败 → 用 awk 替代
+    OLD_ROOT_UUID=$(awk '
+      match($0, /root=UUID=[A-Fa-f0-9-]+/) {
+        print substr($0, RSTART+10, RLENGTH-10); exit
+      }' "$cfg" 2>/dev/null || true)
     [ -n "$OLD_ROOT_UUID" ] && break
   fi
 done

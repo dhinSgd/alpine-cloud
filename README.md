@@ -17,8 +17,9 @@
 前往 [Releases](../../releases) 下载最新版本：
 
 - `slim-alpine-<ver>-uefi.qcow2` — UEFI 启动（推荐，适合 g7/c7/g8 等新规格）
-- `slim-alpine-<ver>-bios.qcow2` — BIOS 启动（适合 g6/c6 等旧规格）
 - `SHA256SUMS` — 校验和
+
+> ⚠️ **BIOS 启动版本暂未支持**：Alpine 官方 BIOS cloud 镜像是裸 ext4（无分区表 + syslinux 引导），与 UEFI 路径完全不同，需额外适配。仅 UEFI 启动方式下载可用。
 
 ```bash
 sha256sum -c SHA256SUMS
@@ -55,6 +56,8 @@ sudo bash scripts/05-test-boot.sh  --boot uefi --timeout 180
 # 产物
 ls -lh output/
 ```
+
+> BIOS 模式当前不可用，详见上方说明。
 
 完整开发文档见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
 

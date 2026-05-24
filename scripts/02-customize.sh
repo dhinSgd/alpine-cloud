@@ -48,7 +48,7 @@ chroot "$ROOTFS" /sbin/apk update
 
 INSTALL_LIST="$CONFIG_DIR/packages-install.list"
 [ -f "$INSTALL_LIST" ] || die "缺少 $INSTALL_LIST"
-INSTALL_PKGS=$(grep -vE '^\s*(#|$)' "$INSTALL_LIST" | awk '{print $1}' | xargs)
+INSTALL_PKGS=$(awk '!/^[[:space:]]*(#|$)/{print $1}' "$INSTALL_LIST" | xargs)
 if [ -n "$INSTALL_PKGS" ]; then
   log_info "安装工具: $INSTALL_PKGS"
   # shellcheck disable=SC2086
@@ -61,7 +61,7 @@ fi
 
 REMOVE_LIST="$CONFIG_DIR/packages-remove.list"
 if [ -f "$REMOVE_LIST" ]; then
-  REMOVE_PKGS=$(grep -vE '^\s*(#|$)' "$REMOVE_LIST" | awk '{print $1}' | xargs)
+  REMOVE_PKGS=$(awk '!/^[[:space:]]*(#|$)/{print $1}' "$REMOVE_LIST" | xargs)
   if [ -n "$REMOVE_PKGS" ]; then
     log_info "卸载包: $REMOVE_PKGS"
     # shellcheck disable=SC2086
