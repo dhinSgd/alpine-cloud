@@ -149,7 +149,13 @@ else
   log_warn "未找到 sshd_config，跳过 SSH 配置"
 fi
 
-# ---------- 6. cloud-init Aliyun 优先配置 ----------
+# ---------- 6. 设置默认主机名 ----------
+
+DEFAULT_HOSTNAME="${DEFAULT_HOSTNAME:-simplealpine}"
+log_info "设置默认主机名: $DEFAULT_HOSTNAME"
+echo "$DEFAULT_HOSTNAME" > "$ROOTFS/etc/hostname"
+
+# ---------- 7. cloud-init Aliyun 优先配置 ----------
 
 CI_CFG="$CONFIG_DIR/cloud-init-aliyun.cfg"
 if [ -f "$CI_CFG" ]; then
@@ -160,7 +166,7 @@ else
   log_warn "未找到 cloud-init Aliyun 配置文件，跳过"
 fi
 
-# ---------- 7. 启用服务（OpenRC） ----------
+# ---------- 8. 启用服务（OpenRC） ----------
 
 log_info "启用关键服务"
 RC_UPDATE() {
@@ -180,7 +186,7 @@ RC_UPDATE cloud-init default
 RC_UPDATE cloud-config default
 RC_UPDATE cloud-final default
 
-# ---------- 8. 清理 ----------
+# ---------- 9. 清理 ----------
 
 log_info "清理缓存/文档/日志/machine-id/SSH host key"
 
