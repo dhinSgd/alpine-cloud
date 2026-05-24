@@ -81,17 +81,32 @@ df -h / | tail -1
 DISK_SIZE=$(df -h / | tail -1 | awk '{print $2}')
 echo "  根分区大小: $DISK_SIZE"
 
-# 检查物理磁盘大小
-PHYSICAL_SIZE=$(lsblk -b -d -o NAME,SIZE | grep vda | awk '{print $2}')
-PHYSICAL_SIZE_GB=$((PHYSICAL_SIZE / 1024 / 1024 / 1024))
+# 检查物理磁盘大小（lsblk 可能不存在，用 fdisk 兜底）
+if command -v lsblk > /dev/null 2>&1; then
+  PHYSICAL_SIZE=$(lsblk -b -d -o NAME,SIZE 2>/dev/null | grep vda | awk '{print $2}')
+  PHYSICAL_SIZE_GB=$((PHYSICAL_SIZE / 1024 / 1024 / 1024))
+else
+  # Alpine 默认无 lsblk，用 fdisk 获取扇区数
+  SECTORS=$(fdisk -l /dev/vda 2>/dev/null | grep 'Disk /dev/vda:' | awk '{print $5}')
+  if [ -n "$SECTORS" ]; then
+    PHYSICAL_SIZE_GB=$((SECTORS / 1024 / 1024 / 1024))
+  else
+    PHYSICAL_SIZE_GB="unknown"
+  fi
+fi
 echo "  物理磁盘: ${PHYSICAL_SIZE_GB}GB"
 
 if [ "$DISK_SIZE" = "922.0M" ] || [ "$DISK_SIZE" = "1.0G" ]; then
-  warn "磁盘未扩容（仍为 1GB），物理磁盘 ${PHYSICAL_SIZE_GB}GB"
-  echo "  诊断 cloud-init growpart 日志："
-  grep -i growpart /var/log/cloud-init.log 2>/dev/null | tail -5 || echo "    无 growpart 日志"
+  # 检查是否真的需要扩容
+  if [ "$PHYSICAL_SIZE_GB" = "1" ] || [ "$PHYSICAL_SIZE_GB" = "0" ]; then
+    pass "磁盘大小正常（1GB 磁盘已满分区，无需扩容）"
+  else
+    warn "磁盘未扩容（仍为 1GB），物理磁盘 ${PHYSICAL_SIZE_GB}GB"
+    echo "  诊断 cloud-init growpart 日志："
+    grep -i growpart /var/log/cloud-init.log 2>/dev/null | tail -5 || echo "    无 growpart 日志"
+  fi
   echo "  分区表："
-  lsblk /dev/vda
+  fdisk -l /dev/vda 2>/dev/null | grep -E '^/dev/vda' || echo "    fdisk 不可用"
 else
   pass "磁盘已扩容到 $DISK_SIZE"
 fi
@@ -255,10 +270,27 @@ if [ "${goto_summary:-0}" -eq 0 ]; then
     sleep 3
   fi
 
+  # 检查 dockerd 是否运行
+  DOCKER_RETRY=0
+  while [ $DOCKER_RETRY -lt 5 ]; do
+    if pidof dockerd > /dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+    DOCKER_RETRY=$((DOCKER_RETRY + 1))
+  done
+
   if pidof dockerd > /dev/null; then
     pass "Docker daemon 运行中"
+    # 加入开机自启
+    if ! rc-update show default | grep -q docker; then
+      rc-update add docker default > /dev/null 2>&1
+      echo "  已加入开机自启"
+    fi
   else
     mark_fail "Docker daemon 未运行"
+    echo "  尝试查看日志："
+    tail -10 /var/log/docker.log 2>/dev/null || echo "    无日志文件"
   fi
   echo ""
 
