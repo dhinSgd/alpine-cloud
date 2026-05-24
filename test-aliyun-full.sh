@@ -86,11 +86,11 @@ if command -v lsblk > /dev/null 2>&1; then
   PHYSICAL_SIZE=$(lsblk -b -d -o NAME,SIZE 2>/dev/null | grep vda | awk '{print $2}')
   PHYSICAL_SIZE_GB=$((PHYSICAL_SIZE / 1024 / 1024 / 1024))
 else
-  # Alpine 默认无 lsblk，用 fdisk 解析字节数
-  # fdisk 输出格式: "Disk /dev/vda: 1 GiB, 1073741824 bytes, 2097152 sectors"
-  DISK_BYTES=$(fdisk -l /dev/vda 2>/dev/null | grep 'Disk /dev/vda:' | sed -E 's/.*,\s*([0-9]+)\s*bytes.*/\1/')
-  if [ -n "$DISK_BYTES" ] && [ "$DISK_BYTES" -eq "$DISK_BYTES" ] 2>/dev/null; then
-    PHYSICAL_SIZE_GB=$((DISK_BYTES / 1024 / 1024 / 1024))
+  # Alpine fdisk 输出格式: "Disk /dev/vda: 2097152 sectors, 1024M"
+  SECTORS=$(fdisk -l /dev/vda 2>/dev/null | grep 'Disk /dev/vda:' | awk '{print $3}')
+  if [ -n "$SECTORS" ] && [ "$SECTORS" -eq "$SECTORS" ] 2>/dev/null; then
+    # 扇区大小通常是 512 字节
+    PHYSICAL_SIZE_GB=$((SECTORS * 512 / 1024 / 1024 / 1024))
   else
     PHYSICAL_SIZE_GB="unknown"
   fi
