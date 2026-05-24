@@ -265,6 +265,13 @@ fi
 if [ "${goto_summary:-0}" -eq 0 ]; then
   # ---------- 19. Docker 服务启动 ----------
   info "[19/20] Docker 服务启动"
+
+  # Docker 依赖 cgroups，先确保 cgroups 已挂载
+  if ! mount | grep -q cgroup; then
+    echo "  挂载 cgroups..."
+    rc-service cgroups start > /dev/null 2>&1
+  fi
+
   if ! rc-service docker status > /dev/null 2>&1; then
     echo "  启动 Docker 服务..."
     rc-service docker start > /dev/null 2>&1
