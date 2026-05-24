@@ -14,3 +14,10 @@ chrony
 
 # 云镜像自动扩容必需
 cloud-utils-growpart
+
+# btrfs 用户态工具（grub-probe / fsck / 维护必需）
+btrfs-progs
+
+# GRUB EFI 支持（含 x86_64-efi 目标的 .mod 文件；
+# 用于重新生成包含 btrfs 模块的 BOOTX64.EFI，使 GRUB 能从 btrfs 上加载 grub.cfg）
+grub-efi

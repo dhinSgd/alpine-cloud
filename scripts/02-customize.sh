@@ -112,6 +112,26 @@ fi
 log_info "重新生成 modules.dep (depmod -a)"
 chroot "$ROOTFS" /sbin/depmod -a "$KERNEL_VERSION"
 
+# 4d. mkinitfs features 加 btrfs + 重建 initramfs
+#    根分区将切到 btrfs，initramfs 必须包含 btrfs 内核模块和 userspace 工具，
+#    否则 init 阶段无法挂载根文件系统。
+MKINITFS_CONF="$ROOTFS/etc/mkinitfs/mkinitfs.conf"
+if [ -f "$MKINITFS_CONF" ]; then
+  CURRENT_FEATURES=$(awk -F'=' '/^features=/{gsub(/"/,"",$2); print $2}' "$MKINITFS_CONF")
+  if echo "$CURRENT_FEATURES" | grep -qw btrfs; then
+    log_info "mkinitfs features 已含 btrfs，跳过"
+  else
+    NEW_FEATURES=$(echo "${CURRENT_FEATURES} btrfs" | xargs)
+    log_info "mkinitfs features: '$CURRENT_FEATURES' -> '$NEW_FEATURES'"
+    sed -i -E "s|^features=.*|features=\"$NEW_FEATURES\"|" "$MKINITFS_CONF"
+  fi
+else
+  log_warn "未找到 $MKINITFS_CONF（不是 Alpine 标准 initramfs?），跳过 features 配置"
+fi
+
+log_info "重新生成 initramfs (mkinitfs $KERNEL_VERSION)"
+chroot "$ROOTFS" /sbin/mkinitfs "$KERNEL_VERSION"
+
 # ---------- 5. 配置 root 密码 + SSH ----------
 
 ROOT_PASS="${DEFAULT_ROOT_PASSWORD:-slimalpine123}"

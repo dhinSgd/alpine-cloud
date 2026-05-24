@@ -141,9 +141,52 @@ if [ "$BOOT_TYPE" = "uefi" ]; then
   ensure_dir "$MOUNT_DIR/boot/efi"
 fi
 
-# ---------- 9. GRUB 配置 UUID 与 rootfstype 替换 ----------
+# ---------- 9. GRUB 重装与配置 patch ----------
+#
+# 关键点：Alpine 官方 cloud UEFI 镜像的 BOOTX64.EFI 是为 ext4 根分区构建的，
+# 其内置模块里没有 btrfs。直接把根换成 btrfs 后，GRUB 阶段会报
+# "error: unknown filesystem" 并掉进 grub rescue。
+# 因此需要在新 btrfs 上 chroot 重装 grub-efi，让生成的 BOOTX64.EFI
+# 把 btrfs 模块编入，自身就能读 btrfs 上的 /boot/grub/grub.cfg。
+#
+# 步骤：
+#   9a. UEFI 先把 ESP 挂到 $MOUNT_DIR/boot/efi
+#   9b. UEFI bind mount /proc /sys /dev /run → chroot grub-install + grub-mkconfig
+#   9c. 对所有 grub.cfg / extlinux.conf 兜底 sed：保证 root UUID/rootfstype/rootflags 一致
 
-# 收集所有 grub.cfg / extlinux.conf 候选路径
+# 9a. UEFI: 挂 ESP
+if [ "$BOOT_TYPE" = "uefi" ]; then
+  log_info "挂载 ESP 到 $MOUNT_DIR/boot/efi"
+  mount "${LOOP_DEV}p${ESP_PART_NUM}" "$MOUNT_DIR/boot/efi"
+fi
+
+# 9b. UEFI: chroot 内重装 GRUB（含 btrfs 模块）+ grub-mkconfig
+if [ "$BOOT_TYPE" = "uefi" ]; then
+  log_info "[UEFI] bind mount 虚拟文件系统进 chroot"
+  for fs in proc sys dev run; do
+    ensure_dir "$MOUNT_DIR/$fs"
+    mount --bind "/$fs" "$MOUNT_DIR/$fs"
+    register_cleanup "umount -lf '$MOUNT_DIR/$fs' 2>/dev/null || true"
+  done
+
+  # --removable：装到 /boot/efi/EFI/BOOT/BOOTX64.EFI（云环境无 NVRAM，必须走 fallback 路径）
+  # --no-nvram：build 主机不写 efivars
+  # --modules：显式列出 EFI binary 内置模块，btrfs 是核心
+  GRUB_MODULES="part_gpt part_msdos btrfs ext2 fat normal linux configfile search search_fs_uuid search_label all_video font gfxterm efi_gop efi_uga"
+  log_info "[UEFI] chroot grub-install --target=x86_64-efi --removable"
+  chroot "$MOUNT_DIR" /usr/sbin/grub-install \
+    --target=x86_64-efi \
+    --efi-directory=/boot/efi \
+    --boot-directory=/boot \
+    --removable \
+    --no-nvram \
+    --modules="$GRUB_MODULES"
+
+  log_info "[UEFI] chroot grub-mkconfig -o /boot/grub/grub.cfg"
+  chroot "$MOUNT_DIR" /usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg
+fi
+
+# 9c. 收集所有候选并做兜底 sed
 CANDIDATES=()
 for p in \
   "$MOUNT_DIR/boot/grub/grub.cfg" \
@@ -154,20 +197,16 @@ do
   [ -f "$p" ] && CANDIDATES+=("$p")
 done
 
-# UEFI: 同步处理 ESP 中的 grub 配置
 if [ "$BOOT_TYPE" = "uefi" ]; then
-  log_info "挂载 ESP 以更新其中的 grub.cfg"
-  mount "${LOOP_DEV}p${ESP_PART_NUM}" "$MOUNT_DIR/boot/efi"
   while IFS= read -r f; do
     CANDIDATES+=("$f")
   done < <(find "$MOUNT_DIR/boot/efi" -type f \( -name 'grub.cfg' -o -name '*.cfg' \) 2>/dev/null || true)
 fi
 
-# 从源 rootfs 的 grub.cfg 中提取旧 root UUID（任选一个候选）
+# 从源 rootfs 的 grub.cfg 中提取旧 root UUID（任选一个候选），用于兜底替换
 OLD_ROOT_UUID=""
 for cfg in "$ROOTFS/boot/grub/grub.cfg" "$ROOTFS/etc/default/grub"; do
   if [ -f "$cfg" ]; then
-    # grep 没匹配时返回 1，在 set -e+pipefail 下会让命令替换整体失败 → 用 awk 替代
     OLD_ROOT_UUID=$(awk '
       match($0, /root=UUID=[A-Fa-f0-9-]+/) {
         print substr($0, RSTART+10, RLENGTH-10); exit
@@ -179,21 +218,19 @@ done
 if [ -n "$OLD_ROOT_UUID" ]; then
   log_info "旧 root UUID: $OLD_ROOT_UUID -> 新: $ROOT_UUID"
 else
-  log_warn "未在源 rootfs grub.cfg 中找到 root=UUID=...（可能用 LABEL 或 PARTUUID）"
+  log_info "源 rootfs grub.cfg 未提取到旧 UUID（可能 grub-mkconfig 已正确生成，仅做 sed 兜底）"
 fi
 
 for cfg in "${CANDIDATES[@]}"; do
   log_info "  patch: ${cfg#"$MOUNT_DIR"}"
-  # 1) 替换具体 UUID
   if [ -n "$OLD_ROOT_UUID" ]; then
     sed -i "s/$OLD_ROOT_UUID/$ROOT_UUID/g" "$cfg"
   fi
-  # 2) 兜底：任何 root=UUID=... -> 新 UUID（防止其它地方写死了不同 UUID）
+  # 兜底：任何 root=UUID=... -> 新 UUID
   sed -i -E "s|root=UUID=[A-Fa-f0-9-]+|root=UUID=$ROOT_UUID|g" "$cfg"
-  # 3) rootfstype=ext4 -> btrfs
+  # rootfstype=ext4 -> btrfs（如果 grub-mkconfig 没改对）
   sed -i -E 's|rootfstype=ext4|rootfstype=btrfs|g' "$cfg"
-  # 4) ro 选项保留；追加 rootflags 以确保挂载时启用子卷
-  #    仅在还没有 rootflags=subvol=@ 时追加
+  # 兜底追加 rootflags=subvol=@（仅在还没有时）
   if ! grep -q 'rootflags=subvol=@' "$cfg"; then
     sed -i -E "s|(root=UUID=[A-Fa-f0-9-]+)|\1 rootflags=subvol=@|g" "$cfg"
   fi
@@ -203,6 +240,13 @@ done
 
 log_info "sync 文件系统"
 sync
+
+# 显式卸载 chroot bind mounts（/proc /sys /dev /run），否则 MOUNT_DIR 无法卸载
+if [ "$BOOT_TYPE" = "uefi" ]; then
+  for fs in run dev sys proc; do
+    safe_umount "$MOUNT_DIR/$fs"
+  done
+fi
 
 # 显式卸载 ESP（如果挂着）
 if [ "$BOOT_TYPE" = "uefi" ]; then
