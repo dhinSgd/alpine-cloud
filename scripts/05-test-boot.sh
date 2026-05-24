@@ -179,8 +179,8 @@ set timeout 30
 send "root\r"
 expect {
   -re "Password:" { send "$rootpass\r" }
-  -re "\[#\$\]\\s*$" {
-    # 某些情况下 root 直接进 shell
+  -re "\[#\\\$\]" {
+    # 极端情况下 root 无密码直接进 shell
     puts "\n✅ \[login\] 无密码直接进入"
   }
   timeout {
@@ -189,28 +189,28 @@ expect {
   }
 }
 
-# 等待 shell prompt 出现并稳定（设置自定义 prompt 避免误匹配）
+# 不再依赖 prompt 匹配（Alpine 登录后 readline 会发 CSI 6n 干扰行尾匹配）。
+# 直接发一个 marker 命令，等 marker 输出，确认 shell 可执行。
+# 多发一个 \r 帮助跳过缓冲中的 motd 末尾。
+set timeout 30
+sleep 2
+send "\r"
+send "echo SHELL_READY=\$?\r"
 expect {
-  -re "\[#\$\]\\s*$" {}
-  -re "incorrect|Login incorrect|failure" {
-    puts "\n❌ \[login\] 登录被拒绝"
+  -re "SHELL_READY=0" { puts "\n✅ \[login\] shell 就绪" }
+  -re "incorrect|Login incorrect|authentication failure" {
+    puts "\n❌ \[login\] 登录被拒绝（密码错误？）"
     exit 20
   }
   timeout {
-    puts "\n❌ \[login\] 未进入 shell"
+    puts "\n❌ \[login\] 未拿到 shell marker"
     exit 20
   }
 }
 
-# 切换到稳定 prompt，关闭别名/历史扩展干扰
-send "export PS1='SLIM\\$ '; export PROMPT_COMMAND=''; set +o histexpand 2>/dev/null; stty -echo 2>/dev/null; echo READY=YES\r"
-expect {
-  "READY=YES" { puts "\n✅ \[login\] shell 就绪" }
-  timeout {
-    puts "\n❌ \[login\] 设置 prompt 失败"
-    exit 20
-  }
-}
+# 关掉历史扩展和回显抑制（避免后续命令被 shell 重复打印干扰 expect 匹配）
+send "set +o histexpand 2>/dev/null; export PS1=''; export PROMPT_COMMAND=''\r"
+sleep 1
 
 # ---------- Stage 3: 等 cloud-init 跑完 ----------
 # cloud-init status --wait 会阻塞直到 done/error/degraded；
