@@ -16,11 +16,10 @@ source "$SCRIPT_DIR/lib/common.sh"
 # shellcheck source=lib/disk-utils.sh
 source "$SCRIPT_DIR/lib/disk-utils.sh"
 
-parse_args "$@"
 require_root
 load_source_env
 
-log_info "阶段 2 (customize) - 启动 [boot=${BOOT_TYPE}]"
+log_info "阶段 2 (customize) - 启动 [boot=uefi]"
 
 ROOTFS="$BUILD_DIR/rootfs-${BOOT_TYPE}"
 [ -d "$ROOTFS" ] || die "rootfs 不存在: $ROOTFS（先跑 01-extract.sh）"

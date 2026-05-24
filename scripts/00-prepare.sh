@@ -10,11 +10,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$SCRIPT_DIR/lib/common.sh"
 
-parse_args "$@"
 require_root
 load_source_env
 
-log_info "阶段 0 (prepare) - 启动 [boot=${BOOT_TYPE}]"
+log_info "阶段 0 (prepare) - 启动 [boot=uefi]"
 
 # ---------- 1. 安装构建依赖 ----------
 

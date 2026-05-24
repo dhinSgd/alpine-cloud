@@ -43,13 +43,13 @@ passwd
 ## 本地构建
 
 ```bash
-# UEFI 版本
-sudo bash scripts/00-prepare.sh    --boot uefi
-sudo bash scripts/01-extract.sh    --boot uefi
-sudo bash scripts/02-customize.sh  --boot uefi
-sudo bash scripts/03-build-image.sh --boot uefi
-sudo bash scripts/04-finalize.sh   --boot uefi
-sudo bash scripts/05-test-boot.sh  --boot uefi --timeout 180
+# 构建 UEFI 镜像
+sudo bash scripts/00-prepare.sh
+sudo bash scripts/01-extract.sh
+sudo bash scripts/02-customize.sh
+sudo bash scripts/03-build-image.sh
+sudo bash scripts/04-finalize.sh
+sudo bash scripts/05-test-boot.sh --timeout 180
 
 # 产物
 ls -lh output/

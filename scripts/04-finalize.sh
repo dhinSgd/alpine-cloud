@@ -11,12 +11,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$SCRIPT_DIR/lib/common.sh"
 
-parse_args "$@"
 require_root
 load_source_env
 require_cmd qemu-img sha256sum python3
 
-log_info "阶段 4 (finalize) - 启动 [boot=${BOOT_TYPE}]"
+log_info "阶段 4 (finalize) - 启动 [boot=uefi]"
 
 INPUT="$BUILD_DIR/output-${BOOT_TYPE}.img"
 OUTPUT="$OUTPUT_DIR/slim-alpine-${ALPINE_VERSION}-${BOOT_TYPE}.qcow2"

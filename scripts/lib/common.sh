@@ -24,40 +24,9 @@ log_error() { printf "%b[ERROR]%b %s\n" "$_CLR_RED"    "$_CLR_RESET" "$*" >&2; }
 
 die() { log_error "$*"; exit 1; }
 
-# ---------- 参数解析 ----------
-# 用法：parse_args "$@"
-# 解析 --boot uefi，导出 BOOT_TYPE 变量。
-parse_args() {
-  BOOT_TYPE=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --boot)
-        [ $# -ge 2 ] || die "--boot 需要参数"
-        BOOT_TYPE="$2"
-        shift 2
-        ;;
-      --boot=*)
-        BOOT_TYPE="${1#--boot=}"
-        shift
-        ;;
-      -h|--help)
-        printf "用法: %s --boot uefi\n" "${0##*/}"
-        exit 0
-        ;;
-      *)
-        die "未知参数: $1"
-        ;;
-    esac
-  done
-
-  case "$BOOT_TYPE" in
-    uefi) ;;
-    "")   die "缺少 --boot 参数（必须为 uefi）" ;;
-    *)    die "--boot 必须为 uefi，收到: $BOOT_TYPE" ;;
-  esac
-
-  export BOOT_TYPE
-}
+# ---------- 启动类型 ----------
+# 只支持 UEFI，硬编码
+export BOOT_TYPE="uefi"
 
 # ---------- 路径解析 ----------
 

@@ -38,19 +38,19 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare (install deps + download image)
-        run: sudo -E bash scripts/00-prepare.sh --boot ${{ matrix.boot_type }}
+        run: sudo -E bash scripts/00-prepare.sh
 
       - name: Extract official rootfs
-        run: sudo -E bash scripts/01-extract.sh --boot ${{ matrix.boot_type }}
+        run: sudo -E bash scripts/01-extract.sh
 
       - name: Customize rootfs (slim down)
-        run: sudo -E bash scripts/02-customize.sh --boot ${{ matrix.boot_type }}
+        run: sudo -E bash scripts/02-customize.sh
 
       - name: Build target image (btrfs)
-        run: sudo -E bash scripts/03-build-image.sh --boot ${{ matrix.boot_type }}
+        run: sudo -E bash scripts/03-build-image.sh
 
       - name: Finalize (qcow2 + sha256)
-        run: sudo -E bash scripts/04-finalize.sh --boot ${{ matrix.boot_type }}
+        run: sudo -E bash scripts/04-finalize.sh
 
       - name: Upload qcow2 artifact
         uses: actions/upload-artifact@v4
@@ -88,7 +88,7 @@ jobs:
           path: output/
 
       - name: Boot test (qemu + expect)
-        run: sudo -E bash scripts/05-test-boot.sh --boot ${{ matrix.boot_type }} --timeout 300
+        run: sudo -E bash scripts/05-test-boot.sh --timeout 300
 
   release:
     name: Create GitHub Release

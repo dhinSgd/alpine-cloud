@@ -15,11 +15,10 @@ source "$SCRIPT_DIR/lib/common.sh"
 # shellcheck source=lib/disk-utils.sh
 source "$SCRIPT_DIR/lib/disk-utils.sh"
 
-parse_args "$@"
 require_root
 load_source_env
 
-log_info "阶段 3 (build-image) - 启动 [boot=${BOOT_TYPE}]"
+log_info "阶段 3 (build-image) - 启动 [boot=uefi]"
 
 ROOTFS="$BUILD_DIR/rootfs-${BOOT_TYPE}"
 SRC_DIR="$BUILD_DIR/source"

@@ -18,33 +18,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 source "$SCRIPT_DIR/lib/common.sh"
 
-# 自定义解析：支持 --boot 和 --timeout
-BOOT_TYPE=""
+# 自定义解析：仅支持 --timeout
 TIMEOUT=300
 while [ $# -gt 0 ]; do
   case "$1" in
-    --boot)    BOOT_TYPE="$2"; shift 2 ;;
-    --boot=*)  BOOT_TYPE="${1#--boot=}"; shift ;;
     --timeout) TIMEOUT="$2"; shift 2 ;;
     --timeout=*) TIMEOUT="${1#--timeout=}"; shift ;;
     -h|--help)
-      printf "用法: %s --boot uefi [--timeout 秒数]\n" "${0##*/}"
+      printf "用法: %s [--timeout 秒数]\n" "${0##*/}"
       exit 0 ;;
     *) die "未知参数: $1" ;;
   esac
 done
-case "$BOOT_TYPE" in
-  uefi) ;;
-  *) die "缺少或非法的 --boot 参数（必须为 uefi）" ;;
-esac
-export BOOT_TYPE
 
 load_source_env
 require_cmd qemu-system-x86_64 expect
 
-log_info "阶段 5 (test-boot) - 启动 [boot=${BOOT_TYPE}, timeout=${TIMEOUT}s]"
+log_info "阶段 5 (test-boot) - 启动 [boot=uefi, timeout=${TIMEOUT}s]"
 
-IMG="$OUTPUT_DIR/slim-alpine-${ALPINE_VERSION}-${BOOT_TYPE}.qcow2"
+IMG="$OUTPUT_DIR/slim-alpine-${ALPINE_VERSION}-uefi.qcow2"
 [ -f "$IMG" ] || die "未找到镜像: $IMG（先跑 04-finalize.sh）"
 
 # 用临时副本，避免 qemu 写入污染原镜像

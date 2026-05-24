@@ -13,11 +13,10 @@ source "$SCRIPT_DIR/lib/common.sh"
 # shellcheck source=lib/disk-utils.sh
 source "$SCRIPT_DIR/lib/disk-utils.sh"
 
-parse_args "$@"
 require_root
 load_source_env
 
-log_info "阶段 1 (extract) - 启动 [boot=${BOOT_TYPE}]"
+log_info "阶段 1 (extract) - 启动 [boot=uefi]"
 
 IMAGE_FILE="$UEFI_IMAGE_FILE"
 
