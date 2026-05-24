@@ -26,7 +26,7 @@ die() { log_error "$*"; exit 1; }
 
 # ---------- 参数解析 ----------
 # 用法：parse_args "$@"
-# 解析 --boot uefi|bios，导出 BOOT_TYPE 变量。
+# 解析 --boot uefi，导出 BOOT_TYPE 变量。
 parse_args() {
   BOOT_TYPE=""
   while [ $# -gt 0 ]; do
@@ -41,7 +41,7 @@ parse_args() {
         shift
         ;;
       -h|--help)
-        printf "用法: %s --boot uefi|bios\n" "${0##*/}"
+        printf "用法: %s --boot uefi\n" "${0##*/}"
         exit 0
         ;;
       *)
@@ -51,9 +51,9 @@ parse_args() {
   done
 
   case "$BOOT_TYPE" in
-    uefi|bios) ;;
-    "")        die "缺少 --boot 参数（uefi 或 bios）" ;;
-    *)         die "--boot 必须为 uefi 或 bios，收到: $BOOT_TYPE" ;;
+    uefi) ;;
+    "")   die "缺少 --boot 参数（必须为 uefi）" ;;
+    *)    die "--boot 必须为 uefi，收到: $BOOT_TYPE" ;;
   esac
 
   export BOOT_TYPE

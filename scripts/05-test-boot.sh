@@ -28,14 +28,14 @@ while [ $# -gt 0 ]; do
     --timeout) TIMEOUT="$2"; shift 2 ;;
     --timeout=*) TIMEOUT="${1#--timeout=}"; shift ;;
     -h|--help)
-      printf "用法: %s --boot uefi|bios [--timeout 秒数]\n" "${0##*/}"
+      printf "用法: %s --boot uefi [--timeout 秒数]\n" "${0##*/}"
       exit 0 ;;
     *) die "未知参数: $1" ;;
   esac
 done
 case "$BOOT_TYPE" in
-  uefi|bios) ;;
-  *) die "缺少或非法的 --boot 参数（uefi|bios）" ;;
+  uefi) ;;
+  *) die "缺少或非法的 --boot 参数（必须为 uefi）" ;;
 esac
 export BOOT_TYPE
 
@@ -55,21 +55,19 @@ cp "$IMG" "$TEST_IMG"
 
 # 定位 OVMF 固件（UEFI 必需）
 OVMF_PATH=""
-if [ "$BOOT_TYPE" = "uefi" ]; then
-  for p in \
-    /usr/share/OVMF/OVMF_CODE.fd \
-    /usr/share/ovmf/OVMF.fd \
-    /usr/share/edk2/x64/OVMF.fd \
-    /usr/share/edk2-ovmf/OVMF.fd
-  do
-    if [ -f "$p" ]; then
-      OVMF_PATH="$p"
-      break
-    fi
-  done
-  [ -n "$OVMF_PATH" ] || die "未找到 OVMF 固件（请安装 ovmf 包）"
-  log_info "使用 OVMF: $OVMF_PATH"
-fi
+for p in \
+  /usr/share/OVMF/OVMF_CODE.fd \
+  /usr/share/ovmf/OVMF.fd \
+  /usr/share/edk2/x64/OVMF.fd \
+  /usr/share/edk2-ovmf/OVMF.fd
+do
+  if [ -f "$p" ]; then
+    OVMF_PATH="$p"
+    break
+  fi
+done
+[ -n "$OVMF_PATH" ] || die "未找到 OVMF 固件（请安装 ovmf 包）"
+log_info "使用 OVMF: $OVMF_PATH"
 
 # 构造 qemu 命令行
 QEMU_BIN="qemu-system-x86_64"
@@ -84,10 +82,8 @@ QEMU_ARGS=(
   -nographic
   -serial "mon:stdio"
   -no-reboot
+  -bios "$OVMF_PATH"
 )
-if [ "$BOOT_TYPE" = "uefi" ]; then
-  QEMU_ARGS+=(-bios "$OVMF_PATH")
-fi
 
 # 启用 KVM 加速（如果可用）
 if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then

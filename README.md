@@ -6,7 +6,7 @@
 - **文件系统**：btrfs + zstd:9 透明压缩
 - **架构**：x86_64
 - **格式**：qcow2（v3 默认，无压缩，最大兼容）
-- **启动方式**：UEFI 与 BIOS 两个独立镜像
+- **启动方式**：UEFI（qcow2 格式）
 - **目标体积**：1GB 虚拟磁盘，qcow2 实际约 300-500MB
 - **cloud-init**：完整保留，阿里云 datasource 优先
 
@@ -16,10 +16,8 @@
 
 前往 [Releases](../../releases) 下载最新版本：
 
-- `slim-alpine-<ver>-uefi.qcow2` — UEFI 启动（推荐，适合 g7/c7/g8 等新规格）
+- `slim-alpine-<ver>-uefi.qcow2` — UEFI 启动（qcow2 格式）
 - `SHA256SUMS` — 校验和
-
-> ⚠️ **BIOS 启动版本暂未支持**：Alpine 官方 BIOS cloud 镜像是裸 ext4（无分区表 + syslinux 引导），与 UEFI 路径完全不同，需额外适配。仅 UEFI 启动方式下载可用。
 
 ```bash
 sha256sum -c SHA256SUMS
@@ -57,8 +55,6 @@ sudo bash scripts/05-test-boot.sh  --boot uefi --timeout 180
 ls -lh output/
 ```
 
-> BIOS 模式当前不可用，详见上方说明。
-
 完整开发文档见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
 
 ## 仓库结构
@@ -95,7 +91,7 @@ ls -lh output/
 - btrfs zstd:9 压缩，长期写入收益高
 - qcow2 不加 `-c` 压缩，优先阿里云兼容性
 - 第一版保守精简（黑名单模式），仅删明确不需要的硬件驱动
-- 同时生成 UEFI 和 BIOS 两个独立镜像
+- 仅支持 UEFI 启动（qcow2 格式）
 
 ## 许可
 

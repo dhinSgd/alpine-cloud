@@ -19,10 +19,7 @@ load_source_env
 
 log_info "阶段 1 (extract) - 启动 [boot=${BOOT_TYPE}]"
 
-case "$BOOT_TYPE" in
-  uefi) IMAGE_FILE="$UEFI_IMAGE_FILE" ;;
-  bios) IMAGE_FILE="$BIOS_IMAGE_FILE" ;;
-esac
+IMAGE_FILE="$UEFI_IMAGE_FILE"
 
 SRC_DIR="$BUILD_DIR/source"
 QCOW2_SRC="$SRC_DIR/$IMAGE_FILE"

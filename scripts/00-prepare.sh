@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 阶段 0: 准备构建环境
 #   - 安装系统依赖
-#   - 下载 Alpine 官方 cloud 镜像（uefi 或 bios 之一）
+#   - 下载 Alpine 官方 cloud 镜像（UEFI）
 #   - 校验 SHA512（从官方 .sha512 文件获取期望值）
 
 set -Eeuo pipefail
@@ -45,20 +45,11 @@ else
   require_cmd qemu-img wget sha512sum sfdisk losetup blkid mkfs.btrfs rsync chroot
 fi
 
-# ---------- 2. 选择对应启动类型的镜像 URL ----------
+# ---------- 2. 选择 UEFI 镜像 URL ----------
 
-case "$BOOT_TYPE" in
-  uefi)
-    IMAGE_FILE="$UEFI_IMAGE_FILE"
-    IMAGE_URL="$UEFI_IMAGE_URL"
-    IMAGE_SHA512_URL="$UEFI_IMAGE_SHA512_URL"
-    ;;
-  bios)
-    IMAGE_FILE="$BIOS_IMAGE_FILE"
-    IMAGE_URL="$BIOS_IMAGE_URL"
-    IMAGE_SHA512_URL="$BIOS_IMAGE_SHA512_URL"
-    ;;
-esac
+IMAGE_FILE="$UEFI_IMAGE_FILE"
+IMAGE_URL="$UEFI_IMAGE_URL"
+IMAGE_SHA512_URL="$UEFI_IMAGE_SHA512_URL"
 
 # ---------- 3. 下载 + 校验 ----------
 

@@ -32,8 +32,6 @@ jobs:
       fail-fast: false
       matrix:
         boot_type: [uefi]
-        # 注：BIOS 镜像是裸 ext4（无分区表 + syslinux 引导）与 UEFI 处理完全不同，
-        # 第一版暂只构建 UEFI。BIOS 支持待 spec 后续单独处理。
 
     steps:
       - name: Checkout
@@ -140,10 +138,8 @@ jobs:
 
           ## 产物
 
-          - \`slim-alpine-${ALPINE_VER}-uefi.qcow2\` — UEFI 启动版本
+          - \`slim-alpine-${ALPINE_VER}-uefi.qcow2\` — UEFI 启动版本（qcow2 格式）
           - \`SHA256SUMS\` — 校验和
-
-          > BIOS 启动版本暂未支持（Alpine BIOS cloud 镜像是裸 ext4 + syslinux 引导，需单独适配）。
 
           ## 默认凭据
 

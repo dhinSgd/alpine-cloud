@@ -43,12 +43,11 @@ truncate -s "$DISK_SIZE" "$OUTPUT_IMG"
 
 # ---------- 2. 自建分区表 ----------
 
-if [ "$BOOT_TYPE" = "uefi" ]; then
-  # GPT:
-  #   p1 EFI System (100 MiB, 204800 sectors @ 512B), type C12A...
-  #   p2 Linux filesystem (剩余), type 0FC6...
-  log_info "创建 GPT 分区表（ESP=100MiB + root=剩余）"
-  sfdisk "$OUTPUT_IMG" >/dev/null <<'PART_EOF'
+# GPT:
+#   p1 EFI System (100 MiB, 204800 sectors @ 512B), type C12A...
+#   p2 Linux filesystem (剩余), type 0FC6...
+log_info "创建 GPT 分区表（ESP=100MiB + root=剩余）"
+sfdisk "$OUTPUT_IMG" >/dev/null <<'PART_EOF'
 label: gpt
 unit: sectors
 sector-size: 512
@@ -56,17 +55,6 @@ sector-size: 512
 start=2048, size=204800, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="EFI System"
 type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="root"
 PART_EOF
-else
-  # BIOS 路径目前仅占位，build matrix 已禁用，此处仅做基本 DOS 分区
-  log_warn "BIOS 路径未充分测试，仅创建基础 MBR 分区"
-  sfdisk "$OUTPUT_IMG" >/dev/null <<'PART_EOF'
-label: dos
-unit: sectors
-
-start=2048, type=83, bootable
-PART_EOF
-  ROOT_PART_NUM=1
-fi
 
 # ---------- 3. losetup 目标镜像 ----------
 
@@ -78,25 +66,12 @@ log_info "目标 loop 设备: $LOOP_DEV"
 ROOT_PART="${LOOP_DEV}p${ROOT_PART_NUM}"
 [ -b "$ROOT_PART" ] || die "目标根分区设备不存在: $ROOT_PART"
 
-# ---------- 4. 格式化 ESP / 引导区 ----------
+# ---------- 4. 格式化 ESP ----------
 
-if [ "$BOOT_TYPE" = "uefi" ]; then
-  DST_ESP="${LOOP_DEV}p${ESP_PART_NUM}"
-  [ -b "$DST_ESP" ] || die "目标 ESP 分区不存在: $DST_ESP"
-  log_info "mkfs.vfat (FAT32) 格式化 ESP: $DST_ESP"
-  mkfs.vfat -F 32 -n "ESP" "$DST_ESP" >/dev/null
-fi
-
-if [ "$BOOT_TYPE" = "bios" ]; then
-  # 仅在 BIOS 模式下需要复用源 raw 的 MBR 引导代码（466 字节中 0–445 字节）
-  log_info "再次 losetup 源镜像用于复制 MBR 引导代码"
-  SRC_LOOP=$(attach_loop "$RAW_SRC")
-  register_cleanup "detach_loop '$SRC_LOOP'"
-  log_info "dd 复制 MBR 引导代码（446 字节）"
-  dd if="$SRC_LOOP" of="$LOOP_DEV" bs=446 count=1 conv=notrunc,fsync status=none
-  detach_loop "$SRC_LOOP"
-  SRC_LOOP=""
-fi
+DST_ESP="${LOOP_DEV}p${ESP_PART_NUM}"
+[ -b "$DST_ESP" ] || die "目标 ESP 分区不存在: $DST_ESP"
+log_info "mkfs.vfat (FAT32) 格式化 ESP: $DST_ESP"
+mkfs.vfat -F 32 -n "ESP" "$DST_ESP" >/dev/null
 
 # ---------- 5. mkfs.btrfs ----------
 
@@ -157,8 +132,8 @@ fi
 #
 # 步骤：
 #   9.0 写 /etc/default/grub，确保 kernel cmdline 含 rootfstype=btrfs / subvol=@
-#   9a. UEFI 先把 ESP 挂到 $MOUNT_DIR/boot/efi
-#   9b. UEFI bind mount /proc /sys /dev /run → chroot grub-install + grub-mkconfig
+#   9a. 挂 ESP 到 $MOUNT_DIR/boot/efi
+#   9b. bind mount /proc /sys /dev /run → chroot grub-install + grub-mkconfig
 #   9c. 对所有 grub.cfg / extlinux.conf 兜底 sed：保证 root UUID/rootfstype/rootflags 一致
 
 # 9.0 覆盖 /etc/default/grub
@@ -182,41 +157,37 @@ GRUB_CMDLINE_LINUX_DEFAULT="modules=sd-mod,usb-storage,btrfs rootfstype=btrfs ro
 GRUB_CMDLINE_LINUX=""
 GRUB_EOF
 
-# 9a. UEFI: 挂 ESP
-if [ "$BOOT_TYPE" = "uefi" ]; then
-  log_info "挂载 ESP 到 $MOUNT_DIR/boot/efi"
-  mount "${LOOP_DEV}p${ESP_PART_NUM}" "$MOUNT_DIR/boot/efi"
-fi
+# 9a. 挂 ESP
+log_info "挂载 ESP 到 $MOUNT_DIR/boot/efi"
+mount "${LOOP_DEV}p${ESP_PART_NUM}" "$MOUNT_DIR/boot/efi"
 
-# 9b. UEFI: chroot 内重装 GRUB（含 btrfs 模块）+ grub-mkconfig
-if [ "$BOOT_TYPE" = "uefi" ]; then
-  log_info "[UEFI] bind mount 虚拟文件系统进 chroot"
-  for fs in proc sys dev run; do
-    ensure_dir "$MOUNT_DIR/$fs"
-    mount --bind "/$fs" "$MOUNT_DIR/$fs"
-    register_cleanup "umount -lf '$MOUNT_DIR/$fs' 2>/dev/null || true"
-  done
+# 9b. chroot 内重装 GRUB（含 btrfs 模块）+ grub-mkconfig
+log_info "bind mount 虚拟文件系统进 chroot"
+for fs in proc sys dev run; do
+  ensure_dir "$MOUNT_DIR/$fs"
+  mount --bind "/$fs" "$MOUNT_DIR/$fs"
+  register_cleanup "umount -lf '$MOUNT_DIR/$fs' 2>/dev/null || true"
+done
 
-  # --removable：装到 /boot/efi/EFI/BOOT/BOOTX64.EFI（云环境无 NVRAM，必须走 fallback 路径）
-  # --no-nvram：build 主机不写 efivars
-  # --modules：显式列出 EFI binary 内置模块，btrfs 是核心
-  GRUB_MODULES="part_gpt part_msdos btrfs ext2 fat normal linux configfile search search_fs_uuid search_label all_video font gfxterm efi_gop efi_uga"
-  log_info "[UEFI] chroot grub-install --target=x86_64-efi --removable"
-  chroot "$MOUNT_DIR" /usr/sbin/grub-install \
-    --target=x86_64-efi \
-    --efi-directory=/boot/efi \
-    --boot-directory=/boot \
-    --removable \
-    --no-nvram \
-    --modules="$GRUB_MODULES"
+# --removable：装到 /boot/efi/EFI/BOOT/BOOTX64.EFI（云环境无 NVRAM，必须走 fallback 路径）
+# --no-nvram：build 主机不写 efivars
+# --modules：显式列出 EFI binary 内置模块，btrfs 是核心
+GRUB_MODULES="part_gpt part_msdos btrfs ext2 fat normal linux configfile search search_fs_uuid search_label all_video font gfxterm efi_gop efi_uga"
+log_info "chroot grub-install --target=x86_64-efi --removable"
+chroot "$MOUNT_DIR" /usr/sbin/grub-install \
+  --target=x86_64-efi \
+  --efi-directory=/boot/efi \
+  --boot-directory=/boot \
+  --removable \
+  --no-nvram \
+  --modules="$GRUB_MODULES"
 
-  log_info "[UEFI] chroot grub-mkconfig -o /boot/grub/grub.cfg"
-  chroot "$MOUNT_DIR" /usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg
+log_info "chroot grub-mkconfig -o /boot/grub/grub.cfg"
+chroot "$MOUNT_DIR" /usr/sbin/grub-mkconfig -o /boot/grub/grub.cfg
 
-  # 调试：打印生成的关键行（CI 日志可见）
-  log_info "[UEFI] 生成的 grub.cfg linux 行 (前若干条):"
-  grep -nE '\s(linux|menuentry)\b' "$MOUNT_DIR/boot/grub/grub.cfg" | head -20 | sed 's/^/    /'
-fi
+# 调试：打印生成的关键行（CI 日志可见）
+log_info "生成的 grub.cfg linux 行 (前若干条):"
+grep -nE '\s(linux|menuentry)\b' "$MOUNT_DIR/boot/grub/grub.cfg" | head -20 | sed 's/^/    /'
 
 # 9c. 收集所有候选并做兜底 sed
 CANDIDATES=()
@@ -229,11 +200,9 @@ do
   [ -f "$p" ] && CANDIDATES+=("$p")
 done
 
-if [ "$BOOT_TYPE" = "uefi" ]; then
-  while IFS= read -r f; do
-    CANDIDATES+=("$f")
-  done < <(find "$MOUNT_DIR/boot/efi" -type f \( -name 'grub.cfg' -o -name '*.cfg' \) 2>/dev/null || true)
-fi
+while IFS= read -r f; do
+  CANDIDATES+=("$f")
+done < <(find "$MOUNT_DIR/boot/efi" -type f \( -name 'grub.cfg' -o -name '*.cfg' \) 2>/dev/null || true)
 
 # 从源 rootfs 的 grub.cfg 中提取旧 root UUID（任选一个候选），用于兜底替换
 OLD_ROOT_UUID=""
@@ -278,16 +247,12 @@ log_info "sync 文件系统"
 sync
 
 # 显式卸载 chroot bind mounts（/proc /sys /dev /run），否则 MOUNT_DIR 无法卸载
-if [ "$BOOT_TYPE" = "uefi" ]; then
-  for fs in run dev sys proc; do
-    safe_umount "$MOUNT_DIR/$fs"
-  done
-fi
+for fs in run dev sys proc; do
+  safe_umount "$MOUNT_DIR/$fs"
+done
 
-# 显式卸载 ESP（如果挂着）
-if [ "$BOOT_TYPE" = "uefi" ]; then
-  safe_umount "$MOUNT_DIR/boot/efi"
-fi
+# 显式卸载 ESP
+safe_umount "$MOUNT_DIR/boot/efi"
 safe_umount "$MOUNT_DIR"
 
 # 显示 btrfs 实际占用
