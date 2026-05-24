@@ -228,5 +228,8 @@ chroot "$ROOTFS" /usr/bin/ssh-keygen -A
 # cloud-init 残留状态（防止携带 build 环境痕迹）
 rm -rf "$ROOTFS/var/lib/cloud/"* 2>/dev/null || true
 
-log_ok "rootfs 当前大小: $(du -sh "$ROOTFS" | cut -f1)"
+# 计算 rootfs 大小：排除 bind 挂载的 host 目录（/proc /sys /dev /run），
+# 否则 du 会遍历 host 的 /proc 瞬时进程，遇到消失的文件返回非零退出码，
+# 触发 ERR trap 打印误报错误。
+log_ok "rootfs 当前大小: $(du -sh --exclude=proc --exclude=sys --exclude=dev --exclude=run "$ROOTFS" | cut -f1)"
 log_ok "阶段 2 (customize) 完成"
