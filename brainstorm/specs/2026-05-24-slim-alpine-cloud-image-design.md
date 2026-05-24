@@ -26,6 +26,8 @@
 - 基于 Alpine 3.23.4（可参数化版本号）
 - 第一版保守精简：仅删除明确不需要的硬件驱动（蓝牙、声卡、显卡等）
 
+> ⚠️ **V1 实测偏离**：实际实现存在 4 处与原 spec 不一致的合理修正（BIOS 暂缓、自建 GPT 分区表、chroot 重装 GRUB EFI、initramfs 加 btrfs）。spec 主体保留原始设计描述以体现意图；可运行的最终流程以脚本和文档末尾**附录 C：V1 实测偏离记录**为准。
+
 ### 1.3 非目标（Out of Scope）
 
 - ❌ 不支持 ARM64 等其他架构（第一版）
@@ -443,6 +445,8 @@ sudo chroot "$ROOTFS" apk del $REMOVE_PACKAGES || true
 
 #### 5.3.4 内核模块精简（核心精简）⭐
 
+> ⚠️ **实测偏离**：本节仅描述模块裁剪 + `depmod -a`，但实际实现在此之后还追加了 `mkinitfs features += btrfs` 并 chroot 重建 initramfs（否则根换 btrfs 后 initramfs init 阶段无法挂根）。详见**附录 C DEV-4**。
+
 ```bash
 KERNEL_VERSION=$(ls "$ROOTFS/lib/modules/" | head -1)
 MODULES_DIR="$ROOTFS/lib/modules/$KERNEL_VERSION/kernel"
@@ -637,6 +641,10 @@ done
 ```
 
 ### 5.4 阶段 3: build-image.sh
+
+> ⚠️ **实测偏离**：本节描述的"复用源 sfdisk dump"和"保留官方 GRUB 仅做 sed UUID 替换"两步在实测中均不可行。实际实现改为：
+> - **自建 GPT** 分区表（100 MiB ESP + 剩余 btrfs），不复用源分区表 — **附录 C DEV-2**
+> - **chroot 重装 GRUB EFI**，把 btrfs 模块编进 BOOTX64.EFI，并写 `/etc/default/grub` + 跑 `grub-mkconfig` 后再做 sed 兜底 — **附录 C DEV-3**
 
 **职责：** 创建新 qcow2，转 btrfs，复制 rootfs
 
@@ -1186,3 +1194,153 @@ ls -lh output/
 - `03-build-image.sh` 失败：检查 losetup/kpartx 资源是否释放
 - `04-finalize.sh` 失败：运行 `qemu-img info <file>` 查看具体格式问题
 - `05-test-boot.sh` 失败：去掉 `-nographic`，加 `-display gtk` 本地启动查看错误
+
+---
+
+## 附录 C：V1 实测偏离记录
+
+构建过程中根据实测踩坑做出的修正。spec 主体（第 5 章各阶段详细设计）保留原始设计描述以体现意图脉络；本附录记录"实际实现怎么做、为什么必须改"。每一项都对应一个真实 commit 或一段可定位的脚本逻辑。
+
+### 偏离总览
+
+| # | 摘要 | 影响章节 | 实现位置 | 关联 commit |
+|---|------|---------|----------|------------|
+| DEV-1 | 仅构建 UEFI，BIOS 暂缓 | 1.2 / 第 2 节 / 第 6 章 | `.github/workflows/build.yml` matrix=[uefi] | — |
+| DEV-2 | 自建 GPT 分区表替代复用源 sfdisk dump | 5.4 阶段 3 step 2 | `scripts/03-build-image.sh` 自建分区表段 | `7778dc4` |
+| DEV-3 | chroot 重装 GRUB EFI 内置 btrfs 模块 | 5.4 阶段 3（spec 原仅做 sed 替换 UUID） | `scripts/03-build-image.sh` GRUB 重装与配置 patch 段 | `8332a0f`、`93db769` |
+| DEV-4 | mkinitfs features 加 btrfs 并重建 initramfs | 5.3 阶段 2（spec 未涉及 initramfs） | `scripts/02-customize.sh` 阶段 4d | — |
+
+---
+
+### DEV-1：仅构建 UEFI，BIOS 暂缓
+
+**对应 spec**：第 1.2 节范围、第 2 节需求清单"引导方式"行、第 3.1 节构建流程图（matrix 部分）、第 6 章 workflow
+
+**原计划**：同时生成 UEFI + BIOS 两个独立镜像（matrix=[uefi, bios] 并行构建）。
+
+**实际实现**：
+- `.github/workflows/build.yml` 中 build / test matrix 仅 `[uefi]`
+- `scripts/03-build-image.sh` 中 BIOS 分支保留占位但未充分测试，日志会打 `BIOS 路径未充分测试，仅创建基础 MBR 分区`
+
+**原因**：Alpine 官方 BIOS cloud 镜像（`generic_alpine-*-x86_64-bios-cloudinit-r0.qcow2`）实测是**裸 ext4 + syslinux 直接写盘**（无 GPT/MBR 分区表），与 UEFI 镜像（qcow2 + 分区表）处理逻辑完全不同。本设计文档第 5.1~5.4 节描述的"挂载分区 → 提取 rootfs → 自建分区表 → 装 GRUB"流程对 BIOS 镜像并不适用，需要独立的 syslinux 适配路径。第一版聚焦 UEFI，BIOS 留待 v2 单独 spec。
+
+**用户可见影响**：
+- v1 仅发布 `slim-alpine-<ver>-uefi.qcow2`，不发布 BIOS 版本
+- 阿里云仅支持 BIOS 启动的老规格（g6/c6 等）暂不可用本镜像，需选择支持 UEFI 的规格（g7/c7/g8 以上）
+- 1.3 节"非目标"事实上增加一条"v1 不构建 BIOS 启动版本"
+
+**后续计划**：纳入第 9 章 v2 计划，单独 spec 设计 BIOS（syslinux）路径。
+
+---
+
+### DEV-2：自建 GPT 100MiB ESP + 剩余 btrfs（不复用源 sfdisk dump）
+
+**对应 spec**：第 5.4 节阶段 3 step 2 "恢复原镜像的分区表（保留官方引导结构）"
+
+**原计划**：
+```bash
+sfdisk "$OUTPUT_IMG" < "build/source/partition-${BOOT_TYPE}.dump"
+```
+完全复用 01-extract 阶段从官方源镜像导出的分区表，保留官方 ESP 大小与布局。
+
+**实际实现**（`scripts/03-build-image.sh` 自建分区表段）：用内联 sfdisk script 自建 GPT：
+```
+label: gpt
+unit: sectors
+sector-size: 512
+
+start=2048, size=204800, type=C12A7328-..., name="EFI System"  # 100 MiB
+type=0FC63DAF-..., name="root"                                  # 剩余
+```
+
+**原因**：Alpine 官方 cloud UEFI 镜像的 ESP **仅约 512KiB**（只够装原本 ext4 版本的 BOOTX64.EFI 约 120KB）。DEV-3 中需要重装的、内置 btrfs 模块的 GRUB EFI binary 体积大得多（含 `part_gpt / part_msdos / btrfs / ext2 / fat / normal / linux / configfile / search / search_fs_uuid / search_label / all_video / font / gfxterm / efi_gop / efi_uga` 等 16+ 个模块，合计可达数 MB），原 ESP 装不下。
+
+**副作用**：
+- 01-extract 仍调 `sfdisk -d` 保留 `partition-${BOOT_TYPE}.dump` 与 `root-partnum-${BOOT_TYPE}.txt`，但 03 阶段未消费，仅作历史/调试参考
+- `ROOT_PART_NUM` 和 `ESP_PART_NUM` 在 03-build-image.sh 中写死为 `2` 和 `1`（不再依赖 01-extract 的辅助文件）
+- 1GB 总盘 - 100MiB ESP - 1MiB GPT 头尾 ≈ 920MiB 给根 btrfs 用，相对原 ext4 略小但仍满足"qcow2 实际 300-500MB"目标
+
+**关联 commit**：
+- `7778dc4 fix(uefi): 自建 100MiB ESP + 剩余 btrfs，源 ESP 太小装不下含 btrfs 的 GRUB`
+
+---
+
+### DEV-3：chroot 重装 GRUB EFI 让 BOOTX64.EFI 内置 btrfs 模块
+
+**对应 spec**：第 5.4 节阶段 3 step 10（spec 原描述仅做"GRUB 配置中的 UUID 替换"和"rootfstype=ext4→btrfs"的 sed）
+
+**原计划**：保留官方 BOOTX64.EFI 不动，仅 sed 替换新 btrfs UUID 进 grub.cfg、并把 `rootfstype=ext4` 替换为 `rootfstype=btrfs`。
+
+**实际实现**（`scripts/03-build-image.sh` GRUB 重装与配置 patch 段，对应 spec 第 5.4 节 step 9~10）：
+
+1. **写 `/etc/default/grub`**：让后续 `grub-mkconfig` 生成的 cmdline 含必要参数
+   ```
+   GRUB_CMDLINE_LINUX_DEFAULT="modules=sd-mod,usb-storage,btrfs \
+     rootfstype=btrfs rootflags=subvol=@ \
+     console=ttyS0,115200 console=tty0 quiet"
+   ```
+2. **挂 ESP**：把新建的 ESP 分区挂到 `$MOUNT_DIR/boot/efi`
+3. **bind mount** `/proc /sys /dev /run` 进 `$MOUNT_DIR` 准备 chroot
+4. **chroot 重装 GRUB**：
+   ```bash
+   grub-install --target=x86_64-efi \
+     --efi-directory=/boot/efi --boot-directory=/boot \
+     --removable --no-nvram \
+     --modules="part_gpt part_msdos btrfs ext2 fat normal linux configfile \
+                search search_fs_uuid search_label all_video font gfxterm \
+                efi_gop efi_uga"
+   ```
+   关键参数：
+   - `--removable`：装到 `/boot/efi/EFI/BOOT/BOOTX64.EFI`（云环境无 NVRAM，必须走 fallback 路径）
+   - `--no-nvram`：不在 build 主机写 efivars
+   - `--modules`：把 btrfs 等模块**编进 BOOTX64.EFI 自身**，使 GRUB 早期阶段就能读 btrfs 上的 `/boot/grub/grub.cfg`
+5. **chroot 执行 `grub-mkconfig -o /boot/grub/grub.cfg`** 生成包含正确 root/rootfstype/rootflags 的菜单项
+6. **兜底 sed**：对所有候选 cfg 文件（`/boot/grub/grub.cfg`、`/etc/default/grub`、ESP 内所有 `*.cfg`）批量替换 root UUID、`rootfstype=ext4→btrfs`、追加 `rootflags=subvol=@`
+
+**原因**：官方 BOOTX64.EFI 是为 **ext4 根分区**构建的，其内置模块清单中**没有 btrfs**。直接把根换成 btrfs 后，GRUB 启动早期就报 `error: unknown filesystem` 掉进 grub rescue，无法加载 grub.cfg。必须重装 GRUB EFI binary 把 btrfs 模块**编入 binary 自身**，才能从 btrfs 根分区上读到 grub.cfg。
+
+**配套依赖**：`config/packages-install.list` 必须新增：
+- `grub-efi` — 提供 `/usr/sbin/grub-install`、`x86_64-efi` target 的 `.mod` 文件
+- `btrfs-progs` — `grub-install` / `grub-probe` 在识别 btrfs 根分区时依赖用户态工具
+
+**关联 commit**：
+- `8332a0f fix(uefi): 在 btrfs rootfs 上 chroot 重装 GRUB EFI，修复 boot rescue`
+- `93db769 fix(uefi): 写 /etc/default/grub 让 cmdline 含 rootfstype=btrfs，修复 initramfs 挂根`
+
+---
+
+### DEV-4：customize 阶段把 btrfs 加进 mkinitfs features 并重建 initramfs
+
+**对应 spec**：第 5.3 节阶段 2（spec 原 5.3 节描述了内核模块裁剪、apk 安装、cloud-init 配置，但**完全未涉及 initramfs**）
+
+**原计划**：内核模块处理仅做 `depmod -a "$KERNEL_VERSION"` 重建模块依赖。
+
+**实际实现**（`scripts/02-customize.sh` 阶段 4d，紧跟 4c `depmod -a` 之后）：
+```bash
+# 4d. mkinitfs features 加 btrfs + 重建 initramfs
+MKINITFS_CONF="$ROOTFS/etc/mkinitfs/mkinitfs.conf"
+CURRENT_FEATURES=$(awk -F'=' '/^features=/{gsub(/"/,"",$2); print $2}' "$MKINITFS_CONF")
+if echo "$CURRENT_FEATURES" | grep -qw btrfs; then
+  log_info "mkinitfs features 已含 btrfs，跳过"
+else
+  NEW_FEATURES=$(echo "${CURRENT_FEATURES} btrfs" | xargs)
+  sed -i -E "s|^features=.*|features=\"$NEW_FEATURES\"|" "$MKINITFS_CONF"
+fi
+
+chroot "$ROOTFS" /sbin/mkinitfs "$KERNEL_VERSION"
+```
+
+**原因**：Alpine 默认 initramfs features 集（`base/ata/cdrom/keymap/kms/mmc/nvme/raid/scsi/usb/virtio` 等）**不含 btrfs**。根分区切换到 btrfs 后，initramfs init 阶段缺少 btrfs 内核模块以及 btrfs 用户态工具，会出现：
+
+- 即便 grub.cfg 已正确传 `rootfstype=btrfs`，initramfs 仍无法 modprobe btrfs
+- 直接报 `Mounting root: failed` / `ALERT! UUID=... does not exist` 等错误
+
+必须在 customize 阶段就把 btrfs 加进 mkinitfs features 并重新生成 initramfs，确保 boot 时 initramfs 自带 btrfs 支持。这一步与 DEV-3 中 cmdline 的 `modules=sd-mod,usb-storage,btrfs` 配合，才能完整覆盖"GRUB → initramfs → 挂根"的整条路径。
+
+**关联代码**：`scripts/02-customize.sh` 阶段 4d 段
+
+---
+
+### 设计文档维护提示
+
+后续 reviewer 阅读 spec 第 5.3 / 5.4 节时，请同时参照本附录 C 理解最终实现的完整步骤。spec 主体保留"理想化"原始设计是为体现意图脉络，**实际可运行流程以脚本和本附录为准**。后续若 v2 重新支持 BIOS、或换用其他根文件系统、或裁掉本节中的兜底步骤，请同步更新本附录与主体描述。
