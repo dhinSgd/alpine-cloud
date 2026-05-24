@@ -61,8 +61,13 @@ else:
         errors.append(f"compat 异常: {compat!r}, 期望 '1.1' 或 '0.10'")
     if data.get("encrypt"):
         errors.append("不应有加密 (encrypt=True)")
-    if data.get("compression-type"):
-        errors.append(f"不应有 compression-type: {data['compression-type']!r}")
+    # 说明：qcow2 v3 默认在元数据中声明 compression-type=zlib，
+    # 这只是"若用 -c 压缩则采用什么算法"的声明，不代表数据被压缩。
+    # 阿里云只拒绝实际被压缩的 cluster（即 -c 整体压缩），不拒绝该元数据字段。
+    # 只在出现非默认（如 zstd）时告警。
+    ct = data.get("compression-type")
+    if ct and ct not in ("zlib",):
+        errors.append(f"非默认 compression-type: {ct!r}（阿里云仅接受 zlib 默认值）")
     if data.get("extended-l2"):
         errors.append("不应启用 extended-l2 (阿里云不支持)")
 
