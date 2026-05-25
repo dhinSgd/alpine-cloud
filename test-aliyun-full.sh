@@ -317,6 +317,44 @@ if [ "${goto_summary:-0}" -eq 0 ]; then
   echo ""
 fi
 
+# ---------- BONUS: SSH 密钥注入检查 ----------
+# 说明：
+#   - 阿里云控制台创建实例时绑定密钥对 → cloud-init AliYun datasource 从元数据
+#     (http://100.100.100.200/.../public-keys/...) 拉取公钥，由 ssh 模块写入
+#     /root/.ssh/authorized_keys。
+#   - 未绑定密钥对：本节为 warn 而非 fail（仍可用密码登录）。
+#   - 镜像构建时通过 SSH_AUTHORIZED_KEYS 环境变量预置的公钥也会在此显现。
+info "[BONUS] SSH 密钥注入检查"
+SSH_DIR="/root/.ssh"
+AUTH_KEYS="$SSH_DIR/authorized_keys"
+
+if [ ! -d "$SSH_DIR" ]; then
+  warn "$SSH_DIR 不存在 — 未注入任何 SSH 公钥（如需密钥登录，请在阿里云控制台绑定密钥对）"
+elif [ ! -s "$AUTH_KEYS" ]; then
+  warn "$AUTH_KEYS 不存在或为空 — 未注入任何 SSH 公钥"
+else
+  # 权限校验
+  DIR_MODE=$(stat -c '%a' "$SSH_DIR" 2>/dev/null)
+  DIR_OWNER=$(stat -c '%u' "$SSH_DIR" 2>/dev/null)
+  FILE_MODE=$(stat -c '%a' "$AUTH_KEYS" 2>/dev/null)
+  FILE_OWNER=$(stat -c '%u' "$AUTH_KEYS" 2>/dev/null)
+  echo "  目录: $SSH_DIR mode=$DIR_MODE owner=$DIR_OWNER"
+  echo "  文件: $AUTH_KEYS mode=$FILE_MODE owner=$FILE_OWNER"
+
+  if [ "$DIR_MODE" = "700" ] && [ "$DIR_OWNER" = "0" ] \
+     && [ "$FILE_MODE" = "600" ] && [ "$FILE_OWNER" = "0" ]; then
+    pass "权限/属主正确（700/600 + root）"
+  else
+    warn "权限/属主异常（期望 dir=700/root file=600/root）"
+  fi
+
+  echo "  ----- authorized_keys 内容 -----"
+  cat "$AUTH_KEYS"
+  echo "  ----- 公钥指纹 -----"
+  ssh-keygen -lf "$AUTH_KEYS" 2>/dev/null || echo "  (ssh-keygen 解析失败)"
+fi
+echo ""
+
 # ---------- 总结 ----------
 echo "========================================"
 if [ $FAILED_TESTS -eq 0 ]; then

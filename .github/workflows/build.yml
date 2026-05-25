@@ -44,7 +44,14 @@ jobs:
         run: sudo -E bash scripts/01-extract.sh
 
       - name: Customize rootfs (slim down)
-        run: sudo -E bash scripts/02-customize.sh
+        env:
+          # 注入固定测试公钥（仓库 config/test-ssh-public-key.pub），私钥不存在。
+          # 注释行（#）由 02-customize.sh 写入 authorized_keys 时无害（OpenSSH 忽略）。
+          # 02-customize.sh 检测到 SSH_AUTHORIZED_KEYS 非空即触发预置。
+          SSH_AUTHORIZED_KEYS_FILE: config/test-ssh-public-key.pub
+        run: |
+          SSH_AUTHORIZED_KEYS="$(cat "$SSH_AUTHORIZED_KEYS_FILE")" \
+            sudo --preserve-env=SSH_AUTHORIZED_KEYS bash scripts/02-customize.sh
 
       - name: Build target image (btrfs)
         run: sudo -E bash scripts/03-build-image.sh
@@ -88,7 +95,12 @@ jobs:
           path: output/
 
       - name: Boot test (qemu + expect)
-        run: sudo -E bash scripts/05-test-boot.sh --timeout 300
+        env:
+          # 与 build job 联动：保持环境变量一致，05-test-boot.sh 会启用 Stage 10 SSH 公钥校验
+          SSH_AUTHORIZED_KEYS_FILE: config/test-ssh-public-key.pub
+        run: |
+          SSH_AUTHORIZED_KEYS="$(cat "$SSH_AUTHORIZED_KEYS_FILE")" \
+            sudo --preserve-env=SSH_AUTHORIZED_KEYS bash scripts/05-test-boot.sh --timeout 300
 
   release:
     name: Create GitHub Release

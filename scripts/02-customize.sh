@@ -4,6 +4,7 @@
 #   - 卸载黑名单包
 #   - 删除黑名单内核模块文件 + 写入 modprobe.d 软兜底
 #   - 设置 root 密码、开启 SSH 密码登录
+#   - （可选）SSH_AUTHORIZED_KEYS 非空时预置公钥到 /root/.ssh/authorized_keys
 #   - 部署 cloud-init Aliyun 优先配置
 #   - 启用关键服务（OpenRC）
 #   - 清理缓存、文档、日志、machine-id、SSH host key
@@ -147,6 +148,49 @@ if [ -f "$SSHD_CFG" ]; then
   grep -qE '^PasswordAuthentication[[:space:]]+yes' "$SSHD_CFG" || echo "PasswordAuthentication yes" >> "$SSHD_CFG"
 else
   log_warn "未找到 sshd_config，跳过 SSH 配置"
+fi
+
+# ---------- 5b. （可选）构建期预置 SSH 公钥 ----------
+#
+# 触发条件：环境变量 SSH_AUTHORIZED_KEYS 非空
+#
+# 行为：
+#   - 创建 /root/.ssh (mode 700, owner root)
+#   - 写入 /root/.ssh/authorized_keys (mode 600, owner root)
+#   - 日志仅打印每个公钥的指纹（ssh-keygen -lf），不打印完整公钥
+#
+# 与阿里云控制台密钥对的关系：互补，不冲突。
+#   - 阿里云控制台绑定密钥对：cloud-init AliYun datasource 从元数据
+#     (http://100.100.100.200/.../public-keys/...) 拉取公钥，由 ssh 模块
+#     append 写入 /root/.ssh/authorized_keys。
+#   - 构建期注入：本地 qemu 测试、CI 自动化、或不使用阿里云密钥对功能
+#     的场景预置访问。cloud-init 默认 append（不覆盖），两者可共存。
+
+if [ -n "${SSH_AUTHORIZED_KEYS:-}" ]; then
+  log_info "检测到 SSH_AUTHORIZED_KEYS，预置公钥到 /root/.ssh/authorized_keys"
+  install -d -m 0700 -o 0 -g 0 "$ROOTFS/root/.ssh"
+
+  AUTH_KEYS="$ROOTFS/root/.ssh/authorized_keys"
+  if [ -e "$AUTH_KEYS" ]; then
+    log_warn "$AUTH_KEYS 已存在，将被覆盖"
+  fi
+  # 覆盖式写入：每次构建以传入值为准
+  printf '%s\n' "$SSH_AUTHORIZED_KEYS" > "$AUTH_KEYS"
+  chmod 0600 "$AUTH_KEYS"
+  chown 0:0 "$AUTH_KEYS"
+
+  # 仅打印指纹（避免完整公钥进入 CI 日志看起来像泄漏）
+  KEY_COUNT=$(grep -cE '^(ssh-|ecdsa-|sk-)' "$AUTH_KEYS" 2>/dev/null || true)
+  : "${KEY_COUNT:=0}"
+  log_info "已写入 $KEY_COUNT 个公钥，指纹如下："
+  if command -v ssh-keygen >/dev/null 2>&1; then
+    ssh-keygen -lf "$AUTH_KEYS" 2>/dev/null | sed 's/^/  /' \
+      || log_warn "ssh-keygen -lf 解析失败（公钥格式可能异常，但文件已写入）"
+  else
+    log_warn "host 无 ssh-keygen，跳过指纹打印"
+  fi
+else
+  log_info "未设置 SSH_AUTHORIZED_KEYS，跳过构建期 SSH 公钥预置（云上仍可由 cloud-init 注入）"
 fi
 
 # ---------- 6. 设置默认主机名 ----------

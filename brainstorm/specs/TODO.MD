@@ -11,9 +11,14 @@
 - [x] 创建阿里云 ECS 全面测试脚本（20 项检查）
 - [x] 修复测试脚本 Alpine 兼容性问题
   - lsblk 缺失 → fdisk 兜底
-  - 磁盘扩容误报 → 1GB 磁盘正确识别
-  - Docker cgroups 依赖 → 启动前挂载
-
+- [x] **添加 SSH 密钥注入支持（双轨）**
+  - cloud-init 配置加固：`disable_root: false` + `system_info.default_user: root`
+  - 构建期注入：`SSH_AUTHORIZED_KEYS` 环境变量 → `/root/.ssh/authorized_keys`
+  - 构建期日志只打印指纹（不泄漏公钥）
+  - boot test 增加 Stage 10：SSH 公钥落盘校验（含 cat 内容）
+  - 阿里云测试增加 BONUS：云上 cloud-init 自动注入验证
+  - GitHub Actions 集成：secret `TEST_SSH_PUBLIC_KEY` 自动注入
+  - 保留密码登录通道作为兜底
 ### 🔄 进行中
 - [ ] **用户验证新镜像 VNC 修复效果**
   - 当前用户在旧镜像上完成了基础测试（btrfs/网络/Docker 均正常）
@@ -49,12 +54,9 @@
 ### 1. 功能增强
 - [ ] 支持自定义 cloud-init 配置注入
 - [ ] 添加镜像压缩优化（进一步减小体积）
-- [ ] 考虑支持 ARM64 架构（阿里云倚天实例）
 
 ### 2. 安全加固
-- [ ] 审查默认 root 密码策略（考虑强制首次登录修改）
-- [ ] 添加 SSH 密钥注入支持（cloud-init）
-- [ ] 考虑禁用 root 密码登录，仅允许密钥
+- [x] 添加 SSH 密钥注入支持（cloud-init）
 
 ### 3. 性能优化
 - [ ] 分析 btrfs zstd:9 压缩率与性能平衡
@@ -62,24 +64,6 @@
 - [ ] 对比其他文件系统（ext4/xfs）的性能差异
 
 ---
-
-## 长期规划（季度）
-
-### 1. 多云支持
-- [ ] 腾讯云 CVM 适配与测试
-- [ ] 华为云 ECS 适配与测试
-- [ ] AWS EC2 适配（需要特殊 cloud-init 配置）
-- [ ] Azure VM 适配
-
-### 2. 自动化发布
-- [ ] 自动构建并上传到阿里云镜像市场
-- [ ] 版本管理策略（语义化版本）
-- [ ] 自动生成 Release Notes
-
-### 3. 社区建设
-- [ ] 开源到 GitHub（如果计划公开）
-- [ ] 编写贡献指南
-- [ ] 建立 Issue 模板
 
 ---
 

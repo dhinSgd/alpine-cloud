@@ -1,0 +1,17 @@
+# CI 测试专用 ED25519 公钥（仅用于验证 SSH 公钥注入流程）
+#
+# 用途：
+#   GitHub Actions 工作流 (.github/workflows/build.yml) 把本文件内容透传给
+#   scripts/02-customize.sh 的 SSH_AUTHORIZED_KEYS 环境变量，由其写入镜像内的
+#   /root/.ssh/authorized_keys；之后 scripts/05-test-boot.sh 的 Stage 10
+#   校验文件落盘、权限/属主、内容正确性。
+#
+# 安全说明：
+#   - 私钥已在生成时销毁，不存在任何持有者，无法用于真实 SSH 登录
+#   - 公钥固定写入仓库，任何 fork / PR / 重建都自动复用
+#   - 不需要在仓库 Settings 配置任何 secret
+#
+# 替换：如需轮换，重新生成 ed25519 密钥对，覆盖本文件，丢弃私钥即可
+#
+# 指纹：SHA256:Ps4FHUL+VTh+t72vfxraZYsHblImBs30ZxeKeVAv2qg
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINbtLSiaR+GuxLWUFqy0gV7YDRB5sKOeCOgVVyEo++bl alpine-cloud-ci-test (PUBLIC KEY ONLY, PRIVATE KEY DISCARDED)

@@ -11,6 +11,7 @@
 #       * btrfs filesystem df / 不报错
 #       * mount 选项含 compress=zstd 和 subvol=@
 #       * 主机名为 simplealpine
+#       * SSH 公钥落盘正确（仅当构建期注入了 SSH_AUTHORIZED_KEYS 时启用）
 #   - 全部通过后 poweroff
 
 set -Eeuo pipefail
@@ -91,7 +92,14 @@ log_info "qemu 命令: $QEMU_BIN ${QEMU_ARGS[*]}"
 # 传给 expect 的变量
 QEMU_CMD="$QEMU_BIN $(printf '%q ' "${QEMU_ARGS[@]}")"
 ROOT_PASS="${DEFAULT_ROOT_PASSWORD:-slimalpine123}"
-export QEMU_CMD TIMEOUT ROOT_PASS
+# 与 02-customize.sh 联动：若构建期注入了 SSH_AUTHORIZED_KEYS，
+# 则 Stage 10 启用 SSH 公钥落盘校验；否则跳过。
+SSH_KEYS_INJECTED=0
+if [ -n "${SSH_AUTHORIZED_KEYS:-}" ]; then
+  SSH_KEYS_INJECTED=1
+  log_info "检测到 SSH_AUTHORIZED_KEYS，将启用 Stage 10 SSH 公钥校验"
+fi
+export QEMU_CMD TIMEOUT ROOT_PASS SSH_KEYS_INJECTED
 
 # ---------- expect 脚本 ----------
 # 设计原则：
@@ -109,12 +117,14 @@ export QEMU_CMD TIMEOUT ROOT_PASS
 #     14 btrfs filesystem df 失败
 #     15 mount 选项缺 zstd / subvol=@
 #     16 主机名不是 simplealpine
+#     17 SSH 公钥校验失败（authorized_keys 不存在或权限错）
 #     20 自动登录失败
 #     99 未预期的 timeout
 expect <<'EXPECT_EOF'
 set boot_timeout $env(TIMEOUT)
 set qemu $env(QEMU_CMD)
 set rootpass $env(ROOT_PASS)
+set ssh_injected $env(SSH_KEYS_INJECTED)
 
 # 重要：所有发给 shell 的命令都用 tcl 大括号 {...} 包裹，
 # 避免 tcl 把 bash 命令里的 [ ] 当作命令替换（典型例子：grep -E '[0-9]+'）。
@@ -261,6 +271,20 @@ wait_marker "MNT" "btrfs 挂载选项含 zstd 压缩 + subvol=@" \
 shcmd {hostname > /tmp/hostname.out; cat /tmp/hostname.out; if grep -qx 'simplealpine' /tmp/hostname.out; then printf '__HOSTNAME__%s__\n' OK; else printf '__HOSTNAME__%s__\n' FAIL; fi}
 wait_marker "HOSTNAME" "主机名为 simplealpine" \
                        "主机名不是 simplealpine" 16 15
+
+# ---------- Stage 10: SSH 公钥落盘校验（仅在构建期注入了 SSH_AUTHORIZED_KEYS 时启用） ----------
+# 检查项：
+#   - /root/.ssh/ 权限 700、owner root
+#   - /root/.ssh/authorized_keys 存在、权限 600、owner root
+#   - cat 出文件内容（人工肉眼复核 + CI 日志归档）
+#   - 打印指纹（ssh-keygen -lf）
+if {$ssh_injected eq "1"} {
+  shcmd {echo "=== ls -la /root/.ssh/ ==="; ls -la /root/.ssh/ 2>&1; echo "=== cat /root/.ssh/authorized_keys ==="; cat /root/.ssh/authorized_keys 2>&1; echo "=== ssh-keygen -lf /root/.ssh/authorized_keys ==="; ssh-keygen -lf /root/.ssh/authorized_keys 2>&1 || echo "(ssh-keygen 解析失败)"; DIR_MODE=$(stat -c '%a' /root/.ssh 2>/dev/null); DIR_OWNER=$(stat -c '%u' /root/.ssh 2>/dev/null); FILE_MODE=$(stat -c '%a' /root/.ssh/authorized_keys 2>/dev/null); FILE_OWNER=$(stat -c '%u' /root/.ssh/authorized_keys 2>/dev/null); echo "DIR_MODE=$DIR_MODE DIR_OWNER=$DIR_OWNER FILE_MODE=$FILE_MODE FILE_OWNER=$FILE_OWNER"; if [ "$DIR_MODE" = "700" ] && [ "$DIR_OWNER" = "0" ] && [ -s /root/.ssh/authorized_keys ] && [ "$FILE_MODE" = "600" ] && [ "$FILE_OWNER" = "0" ]; then printf '__SSHKEY__%s__\n' OK; else printf '__SSHKEY__%s__\n' FAIL; fi}
+  wait_marker "SSHKEY" "/root/.ssh/authorized_keys 存在且权限/属主正确" \
+                       "/root/.ssh/authorized_keys 缺失或权限/属主错" 17 20
+} else {
+  puts "\n⏭️  \[SSHKEY\] 未设置 SSH_AUTHORIZED_KEYS，跳过 SSH 公钥落盘校验"
+}
 
 # ---------- 全部通过 ----------
 puts "\n========================================"
